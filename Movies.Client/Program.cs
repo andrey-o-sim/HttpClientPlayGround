@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Net.Http;
 using System.Threading.Tasks;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -8,13 +9,13 @@ using Movies.Client.Services;
 namespace Movies.Client
 {
     class Program
-    { 
+    {
         static async Task Main(string[] args)
         {
 
-            using IHost host = CreateHostBuilder(args).Build();         
-            var serviceProvider = host.Services; 
-            
+            using IHost host = CreateHostBuilder(args).Build();
+            var serviceProvider = host.Services;
+
             // For demo purposes: overall catch-all to log any exception that might 
             // happen to the console & wait for key input afterwards so we can easily 
             // inspect the issue.  
@@ -32,10 +33,10 @@ namespace Movies.Client
             {
                 // log the exception
                 var logger = serviceProvider.GetService<ILogger<Program>>();
-                logger.LogError(generalException, 
+                logger.LogError(generalException,
                     "An exception happened while running the integration service.");
             }
-            
+
             Console.ReadKey();
 
             await host.RunAsync();
@@ -44,19 +45,56 @@ namespace Movies.Client
         private static IHostBuilder CreateHostBuilder(string[] args)
         {
             return Host.CreateDefaultBuilder(args).ConfigureServices(
-                (serviceCollection) => ConfigureServices(serviceCollection)); 
+                (serviceCollection) => ConfigureServices(serviceCollection));
         }
 
         private static void ConfigureServices(IServiceCollection serviceCollection)
         {
             // add loggers           
             serviceCollection.AddLogging(configure => configure.AddDebug().AddConsole());
+            serviceCollection.AddHttpClient("MoviesClient", client =>
+            {
+                client.BaseAddress = new Uri("http://localhost:57863");
+                client.Timeout = new TimeSpan(0, 0, 30);
+                client.DefaultRequestHeaders.Clear();
+            })
+                .AddHttpMessageHandler(handler => new TimeOutDelegatingHandler(TimeSpan.FromSeconds(20)))
+                .AddHttpMessageHandler(handler => new RetryPolicyDelegatingHandler(2))
+                .ConfigurePrimaryHttpMessageHandler(handler =>
+            {
+                return new HttpClientHandler()
+                {
+                    AutomaticDecompression = System.Net.DecompressionMethods.GZip
+                };
+            });
+
+            //serviceCollection.AddHttpClient<MoviesClient>(client =>
+            //{
+            //    client.BaseAddress = new Uri("http://localhost:57863");
+            //    client.Timeout = new TimeSpan(0, 0, 30);
+            //    client.DefaultRequestHeaders.Clear();
+            //}).ConfigurePrimaryHttpMessageHandler(handler =>
+            //{
+            //    return new HttpClientHandler()
+            //    {
+            //        AutomaticDecompression = System.Net.DecompressionMethods.GZip
+            //    };
+            //});
+
+            serviceCollection.AddHttpClient<MoviesClient>()
+                .ConfigurePrimaryHttpMessageHandler(handler =>
+            {
+                return new HttpClientHandler()
+                {
+                    AutomaticDecompression = System.Net.DecompressionMethods.GZip
+                };
+            });
 
             // register the integration service on our container with a 
             // scoped lifetime
 
             // For the CRUD demos
-            serviceCollection.AddScoped<IIntegrationService, PartialUpdateService>();
+            //serviceCollection.AddScoped<IIntegrationService, CRUDService>();
 
             // For the partial update demos
             // serviceCollection.AddScoped<IIntegrationService, PartialUpdateService>();
@@ -71,10 +109,10 @@ namespace Movies.Client
             // serviceCollection.AddScoped<IIntegrationService, HttpClientFactoryInstanceManagementService>();
 
             // For the dealing with errors and faults demos
-            // serviceCollection.AddScoped<IIntegrationService, DealingWithErrorsAndFaultsService>();
+            //serviceCollection.AddScoped<IIntegrationService, DealingWithErrorsAndFaultsService>();
 
             // For the custom http handlers demos
-            // serviceCollection.AddScoped<IIntegrationService, HttpHandlersService>();     
+            serviceCollection.AddScoped<IIntegrationService, HttpHandlersService>();
         }
     }
 }
